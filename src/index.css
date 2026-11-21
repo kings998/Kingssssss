@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Outfit:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #007AFF;
+  --color-secondary: #2563EB;
+  --color-accent: #0EA5E9;
+  --color-background: #F2F4F8;
+  --color-surface: #FFFFFF;
+  --color-surface-lighter: #F8FAFC;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Plus Jakarta Sans", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+@layer base {
+  html, body {
+    @apply bg-[#F2F4F8] text-slate-900 font-sans antialiased selection:bg-[#007AFF]/15 selection:text-[#007AFF];
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-tight text-slate-900;
+  }
+}
+
+@layer utilities {
+  .ios-glass {
+    @apply bg-white/85 backdrop-blur-2xl border border-slate-200/80 shadow-[0_8px_30px_rgba(15,23,42,0.06)];
+  }
+
+  .ios-card {
+    @apply bg-white border border-slate-200/80 rounded-[22px] shadow-[0_2px_14px_rgba(15,23,42,0.04)];
+  }
+
+  .ios-card-interactive {
+    @apply bg-white border border-slate-200/80 rounded-[22px] shadow-[0_2px_14px_rgba(15,23,42,0.04)] transition-all duration-150 hover:border-[#007AFF]/35 hover:shadow-[0_10px_28px_rgba(0,122,255,0.09)] active:scale-[0.985];
+  }
+
+  .ios-blue-gradient {
+    @apply bg-gradient-to-br from-[#007AFF] to-[#1D4ED8];
+  }
+
+  .ios-input {
+    @apply w-full bg-[#F4F6FA] border border-slate-200/90 rounded-2xl px-4 py-3 text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none transition-all duration-150 focus:bg-white focus:border-[#007AFF] focus:ring-4 focus:ring-[#007AFF]/10;
+  }
+
+  .ios-pill-blue {
+    @apply bg-[#007AFF]/10 text-[#007AFF] border border-[#007AFF]/20;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(0, 122, 255, 0.2);
+    border-radius: 9999px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 122, 255, 0.4);
+  }
+}

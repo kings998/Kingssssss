@@ -1,0 +1,850 @@
+import React, { useState, useEffect } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { Page, User, UserRole } from './types';
+import Header from './components/Header';
+import BottomNav from './components/BottomNav';
+import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import {
+  doc,
+  getDoc,
+  setDoc,
+  serverTimestamp,
+  collection,
+  query,
+  where,
+  getDocs,
+  writeBatch,
+  onSnapshot,
+  increment,
+  updateDoc,
+} from 'firebase/firestore';
+import { GAMES, getEffectiveRole, isAdminIdentity } from './constants';
+import { IosFeedbackProvider } from './components/IosFeedback';
+
+// Pages
+import Auth from './pages/Auth';
+import Home from './pages/Home';
+import Tournaments from './pages/Tournaments';
+import JoinMatch from './pages/JoinMatch';
+import WalletPage from './pages/Wallet';
+import AddMoney from './pages/AddMoney';
+import Withdraw from './pages/Withdraw';
+import ProfilePage from './pages/Profile';
+import AdminPage from './pages/Admin';
+import CoOwnerPanel from './pages/CoOwnerPanel';
+import StaffPanel from './pages/StaffPanel';
+import AdminUserDetail from './pages/AdminUserDetail';
+import AdminEditMatch from './pages/AdminEditMatch';
+import AdminCreateMatch from './pages/AdminCreateMatch';
+import ReferralPage from './pages/Referral';
+import ProfileDetails from './pages/ProfileDetails';
+import GameStats from './pages/GameStats';
+import GameModes from './pages/GameModes';
+import AdminModes from './pages/AdminModes';
+import Leaderboard from './pages/Leaderboard';
+import MatchDetails from './pages/MatchDetails';
+import ChatPage from './pages/Chat';
+import GlobalNotificationListener from './components/GlobalNotificationListener';
+
+const DEFAULT_USER_DATA = {
+  wallet: {
+    deposit: 500,
+    winnings: 0,
+    bonus: 200,
+  },
+  isKycVerified: false,
+  isAdmin: false,
+  stats: {
+    matchesPlayed: 0,
+    totalWins: 0,
+    totalKills: 0,
+    totalWinnings: 0,
+  },
+};
+
+const pageToPath: Record<Page, string> = {
+  [Page.LOGIN]: '/login',
+  [Page.SIGNUP]: '/signup',
+  [Page.HOME]: '/home',
+  [Page.TOURNAMENTS]: '/tournaments',
+  [Page.JOIN_MATCH]: '/match',
+  [Page.WALLET]: '/wallet',
+  [Page.ADD_MONEY]: '/wallet/add',
+  [Page.WITHDRAW]: '/wallet/withdraw',
+  [Page.PROFILE]: '/profile',
+  [Page.ADMIN]: '/admin',
+  [Page.CO_OWNER]: '/co-owner',
+  [Page.STAFF]: '/staff',
+  [Page.ADMIN_USER_PROFILE]: '/admin/user',
+  [Page.ADMIN_EDIT_MATCH]: '/admin/match/edit',
+  [Page.ADMIN_CREATE_MATCH]: '/admin/match/create',
+  [Page.REFERRAL]: '/referral',
+  [Page.PROFILE_DETAILS]: '/profile/details',
+  [Page.GAME_STATS]: '/profile/stats',
+  [Page.GAME_MODES]: '/game-modes',
+  [Page.ADMIN_MODES]: '/admin/modes',
+  [Page.LEADERBOARD]: '/leaderboard',
+  [Page.MATCH_DETAILS]: '/match-details',
+  [Page.CHAT]: '/chat',
+};
+
+const pathToPage: Record<string, Page> = {
+  '/login': Page.LOGIN,
+  '/signup': Page.SIGNUP,
+  '/home': Page.HOME,
+  '/tournaments': Page.TOURNAMENTS,
+  '/match': Page.JOIN_MATCH,
+  '/match-details': Page.MATCH_DETAILS,
+  '/wallet/add': Page.ADD_MONEY,
+  '/wallet/withdraw': Page.WITHDRAW,
+  '/wallet': Page.WALLET,
+  '/profile/details': Page.PROFILE_DETAILS,
+  '/profile/stats': Page.GAME_STATS,
+  '/profile': Page.PROFILE,
+  '/admin/user': Page.ADMIN_USER_PROFILE,
+  '/admin/match/edit': Page.ADMIN_EDIT_MATCH,
+  '/admin/match/create': Page.ADMIN_CREATE_MATCH,
+  '/admin/modes': Page.ADMIN_MODES,
+  '/admin': Page.ADMIN,
+  '/co-owner': Page.CO_OWNER,
+  '/staff': Page.STAFF,
+  '/referral': Page.REFERRAL,
+  '/game-modes': Page.GAME_MODES,
+  '/leaderboard': Page.LEADERBOARD,
+  '/chat': Page.CHAT,
+};
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [pathname]);
+  return null;
+}
+
+export default function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [joinedMatchIds, setJoinedMatchIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    let unsubscribeUser: (() => void) | null = null;
+
+    const seedDatabase = async (email: string, uid: string) => {
+      if (!isAdminIdentity(email, uid)) return;
+      try {
+        const gamesSnap = await getDocs(collection(db, 'games'));
+        if (gamesSnap.empty) {
+          const batch = writeBatch(db);
+          GAMES.forEach((game) => {
+            batch.set(doc(db, 'games', game.id), game);
+          });
+          await batch.commit();
+        }
+
+        const rulesSnap = await getDocs(collection(db, 'gameRules'));
+        if (rulesSnap.empty) {
+          const batch = writeBatch(db);
+          const defaultRules = [
+            {
+              id: 'battle_royale',
+              type: 'Battle Royale',
+              rules: [
+                'No hacking or cheating allowed.',
+                'No emulator players allowed.',
+                'Using banned apps will lead to ban.',
+                'Screenshot of match is mandatory.',
+                'Respect other players.',
+                'Late entry is not allowed.',
+                'Admin decision will be final.',
+              ],
+            },
+            {
+              id: 'clash_squad',
+              type: 'Clash Squad',
+              rules: [
+                'No hacking or cheating allowed.',
+                'No emulator players allowed.',
+                'Teaming with enemies is banned.',
+                'Screenshot of match is mandatory.',
+                'Respect other players.',
+                'Late entry is not allowed.',
+                'Admin decision will be final.',
+              ],
+            },
+            {
+              id: 'lone_wolf',
+              type: 'Lone Wolf',
+              rules: [
+                'No hacking or cheating allowed.',
+                'No emulator players allowed.',
+                'Rank pushing is not allowed.',
+                'Screenshot of match is mandatory.',
+                'Respect other players.',
+                'Late entry is not allowed.',
+                'Admin decision will be final.',
+              ],
+            },
+          ];
+          defaultRules.forEach((rule) => {
+            batch.set(doc(db, 'gameRules', rule.id), rule);
+          });
+          await batch.commit();
+        }
+
+        const settingsSnap = await getDoc(doc(db, 'appSettings', 'referral_support'));
+        if (!settingsSnap.exists()) {
+          await setDoc(doc(db, 'appSettings', 'referral_support'), {
+            referral: {
+              baseUrl: window.location.origin,
+              perReferralReward: 50,
+              rewardType: 'bonus',
+              depositPercentage: 50,
+              bonusPercentage: 50,
+              newUserReward: 10,
+            },
+            support: {
+              whatsapp: 'https://wa.me/910000000000',
+              telegram: 'https://t.me/kingsreload',
+              email: 'support@kingsreload.com',
+            },
+          });
+        }
+
+        const modesSnap = await getDocs(collection(db, 'gameModes'));
+        if (modesSnap.empty) {
+          const { GAME_MODES_DATA } = await import('./constants');
+          const batch = writeBatch(db);
+          Object.entries(GAME_MODES_DATA).forEach(([gameId, modes]) => {
+            modes.forEach((mode, index) => {
+              const modeId = `${gameId}_${mode.id}`;
+              batch.set(doc(db, 'gameModes', modeId), {
+                ...mode,
+                gameId,
+                order: index,
+              });
+            });
+          });
+          await batch.commit();
+        }
+      } catch (error) {
+        console.error('Error seeding database:', error);
+      }
+    };
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (unsubscribeUser) {
+        unsubscribeUser();
+        unsubscribeUser = null;
+      }
+
+      if (firebaseUser) {
+        seedDatabase(firebaseUser.email || '', firebaseUser.uid);
+
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+
+        unsubscribeUser = onSnapshot(
+          userDocRef,
+          async (userDoc) => {
+            if (userDoc.exists()) {
+              const data = userDoc.data() as any;
+
+              if (!data.wallet) {
+                const migratedWallet = {
+                  deposit: data.walletBalance || 0,
+                  winnings: data.winnings || 0,
+                  bonus: data.bonus || 0,
+                };
+
+                if (
+                  data.walletBalance === undefined &&
+                  data.winnings === undefined &&
+                  data.bonus === undefined
+                ) {
+                  Object.assign(migratedWallet, DEFAULT_USER_DATA.wallet);
+                }
+
+                const batch = writeBatch(db);
+                batch.update(userDocRef, {
+                  wallet: migratedWallet,
+                });
+                await batch.commit();
+                return;
+              }
+
+              const normalizedEmail = (firebaseUser.email || '').trim().toLowerCase();
+              let assignedRole: UserRole | undefined = data.role;
+
+              if (isAdminIdentity(firebaseUser.email, firebaseUser.uid)) {
+                assignedRole = 'admin';
+              } else {
+                try {
+                  const adminSnap = await getDoc(doc(db, 'admins', firebaseUser.uid));
+                  if (adminSnap.exists()) {
+                    const r = adminSnap.data()?.role as UserRole | undefined;
+                    if (r === 'admin' || r === 'co_owner' || r === 'staff') {
+                      assignedRole = r;
+                    }
+                  } else if (normalizedEmail) {
+                    const inviteSnap = await getDoc(doc(db, 'roleAssignments', normalizedEmail));
+                    if (inviteSnap.exists()) {
+                      const r = inviteSnap.data()?.role as UserRole | undefined;
+                      if (r === 'admin' || r === 'co_owner' || r === 'staff') {
+                        assignedRole = r;
+                      }
+                    }
+                  }
+                } catch {
+                  // Ignore if user has no role assignment document
+                }
+              }
+
+              const effectiveRole = getEffectiveRole({
+                role: assignedRole,
+                isAdmin: data.isAdmin,
+                email: firebaseUser.email,
+                id: firebaseUser.uid,
+              });
+              const isAdmin = effectiveRole === 'admin';
+
+              if (firebaseUser.emailVerified && ((isAdmin && !data.isAdmin) || (assignedRole && data.role !== assignedRole))) {
+                updateDoc(userDocRef, {
+                  ...(isAdmin ? { isAdmin: true } : {}),
+                  ...(assignedRole ? { role: assignedRole } : {}),
+                }).catch(() => {});
+              }
+
+              setUser({ id: userDoc.id, ...data, role: effectiveRole, isAdmin } as User);
+              setIsLoggedIn(true);
+              setLoading(false);
+
+              if (data.referredBy && !data.referralClaimed) {
+                processReferralReward(data, firebaseUser.uid);
+              }
+
+              if (
+                location.pathname === '/login' ||
+                location.pathname === '/signup' ||
+                location.pathname === '/'
+              ) {
+                navigate('/home');
+              }
+            } else {
+              // Give email/password signup handler in Auth.tsx a brief window to write custom username & phone first
+              const createdMs = firebaseUser.metadata.creationTime
+                ? new Date(firebaseUser.metadata.creationTime).getTime()
+                : 0;
+              if (createdMs && Date.now() - createdMs < 4000) {
+                await new Promise((r) => setTimeout(r, 700));
+                const retrySnap = await getDoc(userDocRef).catch(() => null);
+                if (retrySnap?.exists()) return;
+              }
+
+              const normalizedEmail = (firebaseUser.email || '').trim().toLowerCase();
+              let initialRole: UserRole = isAdminIdentity(firebaseUser.email, firebaseUser.uid)
+                ? 'admin'
+                : 'user';
+              if (initialRole === 'user' && normalizedEmail) {
+                try {
+                  const inviteSnap = await getDoc(doc(db, 'roleAssignments', normalizedEmail));
+                  if (inviteSnap.exists()) {
+                    const r = inviteSnap.data()?.role as UserRole | undefined;
+                    if (r === 'admin' || r === 'co_owner' || r === 'staff') {
+                      initialRole = r;
+                    }
+                  }
+                } catch {
+                  // Ignore
+                }
+              }
+
+              // Firestore rules only allow non-user role/isAdmin creation when token.email_verified is true
+              const canWriteElevatedOnCreate = firebaseUser.emailVerified === true;
+              const newUser: User = {
+                username: firebaseUser.displayName || `Gamer_${firebaseUser.uid.slice(0, 5)}`,
+                email: firebaseUser.email || '',
+                phone: firebaseUser.phoneNumber || '',
+                ...DEFAULT_USER_DATA,
+                role: canWriteElevatedOnCreate ? initialRole : 'user',
+                isAdmin: canWriteElevatedOnCreate ? initialRole === 'admin' : false,
+              };
+              await setDoc(
+                userDocRef,
+                {
+                  ...newUser,
+                  createdAt: serverTimestamp(),
+                },
+                { merge: true }
+              ).catch(() => {});
+            }
+          },
+          (error) => {
+            handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
+            setLoading(false);
+          }
+        );
+
+        try {
+          const q = query(collection(db, 'registrations'), where('userId', '==', firebaseUser.uid));
+          const regSnap = await getDocs(q);
+          const matchIds = regSnap.docs.map((doc) => doc.data().tournamentId);
+          setJoinedMatchIds(matchIds);
+        } catch (error) {
+          console.error('Error fetching registrations:', error);
+        }
+      } else {
+        setIsLoggedIn(false);
+        setUser(null);
+        setJoinedMatchIds([]);
+        if (!['/login', '/signup'].includes(location.pathname)) {
+          navigate('/login');
+        }
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeUser) unsubscribeUser();
+    };
+  }, []);
+
+  const handleLogin = () => {
+    navigate('/home');
+  };
+
+  const handleLogout = async () => {
+    await auth.signOut();
+    navigate('/login');
+  };
+
+  const handlePageChange = (page: Page, id?: string) => {
+    let path = pageToPath[page];
+    if (id) {
+      if (page === Page.TOURNAMENTS) path = `${path}/${id}`;
+      else if (page === Page.JOIN_MATCH) path = `${path}/${id}`;
+      else if (page === Page.MATCH_DETAILS) path = `${path}/${id}`;
+      else if (page === Page.ADMIN_USER_PROFILE) path = `${path}/${id}`;
+      else if (page === Page.ADMIN_EDIT_MATCH) path = `${path}/${id}`;
+      else if (page === Page.ADMIN_CREATE_MATCH) path = `${path}/${id}`;
+      else if (page === Page.GAME_MODES) path = `${path}/${id}`;
+    }
+    navigate(path);
+  };
+
+  const handleJoinSuccess = (matchId: string) => {
+    setJoinedMatchIds((prev) => [...prev, matchId]);
+  };
+
+  const processReferralReward = async (currentUser: any, uid: string) => {
+    if (!currentUser.referredBy || currentUser.referralClaimed) return;
+
+    try {
+      const settingsSnap = await getDoc(doc(db, 'appSettings', 'referral_support'));
+      if (!settingsSnap.exists()) return;
+      const settings = settingsSnap.data();
+      const refSettings = settings.referral;
+      if (!refSettings) return;
+
+      const q = query(collection(db, 'users'), where('username', '==', currentUser.referredBy));
+      const referrerSnap = await getDocs(q);
+      if (referrerSnap.empty) {
+        await updateDoc(doc(db, 'users', uid), { referralClaimed: true });
+        return;
+      }
+
+      const qDevice = query(
+        collection(db, 'users'),
+        where('deviceId', '==', currentUser.deviceId || 'unknown'),
+        where('referralClaimed', '==', true)
+      );
+      const deviceSnap = await getDocs(qDevice);
+      if (!deviceSnap.empty) {
+        await updateDoc(doc(db, 'users', uid), { referralClaimed: true });
+        return;
+      }
+
+      const referrerDoc = referrerSnap.docs[0];
+      const referrerId = referrerDoc.id;
+
+      const refReward = refSettings.perReferralReward || 0;
+      if (refReward > 0) {
+        const referrerUpdate: any = {};
+        if (refSettings.rewardType === 'deposit') {
+          referrerUpdate['wallet.deposit'] = increment(refReward);
+        } else if (refSettings.rewardType === 'bonus') {
+          referrerUpdate['wallet.bonus'] = increment(refReward);
+        } else if (refSettings.rewardType === 'both') {
+          const depPercentage = refSettings.depositPercentage || 50;
+          const depAmount = (refReward * depPercentage) / 100;
+          const bonusAmount = refReward - depAmount;
+          referrerUpdate['wallet.deposit'] = increment(depAmount);
+          referrerUpdate['wallet.bonus'] = increment(bonusAmount);
+        }
+
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'users', referrerId), referrerUpdate);
+
+        batch.set(doc(collection(db, 'transactions')), {
+          userId: referrerId,
+          type: 'bonus',
+          amount: refReward,
+          status: 'completed',
+          title: `Referral Reward: ${currentUser.username}`,
+          createdAt: serverTimestamp(),
+        });
+
+        const newUserReward = refSettings.newUserReward || 0;
+        if (newUserReward > 0) {
+          batch.update(doc(db, 'users', uid), {
+            'wallet.bonus': increment(newUserReward),
+            referralClaimed: true,
+          });
+
+          batch.set(doc(collection(db, 'transactions')), {
+            userId: uid,
+            type: 'bonus',
+            amount: newUserReward,
+            status: 'completed',
+            title: `Referral Bonus (from ${currentUser.referredBy})`,
+            createdAt: serverTimestamp(),
+          });
+        } else {
+          batch.update(doc(db, 'users', uid), { referralClaimed: true });
+        }
+
+        await batch.commit();
+      }
+    } catch (err) {
+      console.error('Error processing referral reward:', err);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#F2F4F8] flex flex-col items-center justify-center">
+        <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center">
+          <div className="w-6 h-6 border-2 border-[#007AFF] border-t-transparent rounded-full animate-spin" />
+        </div>
+        <p className="mt-4 text-xs font-bold uppercase tracking-widest text-slate-500">
+          Loading Arena...
+        </p>
+      </div>
+    );
+  }
+
+  const currentPath = location.pathname;
+  let currentPage = Page.HOME;
+  for (const [path, page] of Object.entries(pathToPage)) {
+    if (currentPath.startsWith(path)) {
+      currentPage = page;
+      break;
+    }
+  }
+
+  const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+    if (!isLoggedIn && !loading) {
+      return <Navigate to="/login" replace />;
+    }
+    if (!user && isLoggedIn) {
+      return (
+        <div className="min-h-screen bg-[#F2F4F8] flex flex-col items-center justify-center pt-20">
+          <div className="w-8 h-8 border-2 border-[#007AFF] border-t-transparent rounded-full animate-spin" />
+          <p className="mt-3 text-xs font-bold uppercase tracking-widest text-slate-500">
+            Syncing Profile...
+          </p>
+        </div>
+      );
+    }
+    return <>{children}</>;
+  };
+
+  const showChrome = isLoggedIn && !['/login', '/signup'].includes(location.pathname);
+  const showHeader =
+    showChrome &&
+    ![
+      '/home',
+      '/tournaments',
+      '/match/',
+      '/match-details/',
+      '/wallet/add',
+      '/wallet/withdraw',
+      '/admin',
+      '/co-owner',
+      '/staff',
+      '/referral',
+      '/profile/details',
+      '/profile/stats',
+      '/game-modes',
+      '/profile',
+      '/chat',
+    ].some((p) => location.pathname.startsWith(p));
+  const showNav =
+    showChrome && !['/match/', '/match-details/', '/admin/match/'].some((p) => location.pathname.startsWith(p));
+
+  return (
+    <IosFeedbackProvider>
+      <div className="min-h-screen bg-[#F2F4F8] text-slate-900 relative selection:bg-[#007AFF]/15">
+        <ScrollToTop />
+        <GlobalNotificationListener
+          user={user}
+          joinedMatchIds={joinedMatchIds}
+          onPageChange={handlePageChange}
+        />
+        {showHeader && <Header user={user!} onPageChange={handlePageChange} />}
+
+        <main className="mx-auto max-w-6xl min-h-screen bg-[#F2F4F8] overflow-x-hidden">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname.split('/')[1]}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.16 }}
+              className="w-full"
+            >
+              <Routes location={location}>
+                <Route path="/" element={<Navigate to="/home" replace />} />
+                <Route path="/login" element={<Auth onLogin={handleLogin} />} />
+                <Route path="/signup" element={<Auth onLogin={handleLogin} />} />
+
+                <Route
+                  path="/home"
+                  element={
+                    <ProtectedRoute>
+                      <Home user={user!} onPageChange={handlePageChange} joinedMatchIds={joinedMatchIds} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/game-modes/:gameId"
+                  element={
+                    <ProtectedRoute>
+                      <GameModes onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/tournaments"
+                  element={
+                    <ProtectedRoute>
+                      <Tournaments onPageChange={handlePageChange} joinedMatchIds={joinedMatchIds} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/tournaments/:gameId"
+                  element={
+                    <ProtectedRoute>
+                      <Tournaments onPageChange={handlePageChange} joinedMatchIds={joinedMatchIds} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/match-details/:id"
+                  element={
+                    <ProtectedRoute>
+                      <MatchDetails
+                        user={user!}
+                        onPageChange={handlePageChange}
+                        joinedMatchIds={joinedMatchIds}
+                      />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/match/:id"
+                  element={
+                    <ProtectedRoute>
+                      <JoinMatch
+                        user={user!}
+                        onPageChange={handlePageChange}
+                        joinedMatchIds={joinedMatchIds}
+                        onJoinSuccess={handleJoinSuccess}
+                      />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/wallet"
+                  element={
+                    <ProtectedRoute>
+                      <WalletPage user={user!} onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/wallet/add"
+                  element={
+                    <ProtectedRoute>
+                      <AddMoney onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/wallet/withdraw"
+                  element={
+                    <ProtectedRoute>
+                      <Withdraw user={user!} onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/profile"
+                  element={
+                    <ProtectedRoute>
+                      <ProfilePage user={user!} onPageChange={handlePageChange} onLogout={handleLogout} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/profile/details"
+                  element={
+                    <ProtectedRoute>
+                      <ProfileDetails user={user!} onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/profile/stats"
+                  element={
+                    <ProtectedRoute>
+                      <GameStats user={user!} onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/referral"
+                  element={
+                    <ProtectedRoute>
+                      <ReferralPage user={user!} onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/chat"
+                  element={
+                    <ProtectedRoute>
+                      <ChatPage user={user!} onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute>
+                      <AdminPage user={user} onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/co-owner"
+                  element={
+                    <ProtectedRoute>
+                      <CoOwnerPanel user={user} onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/staff"
+                  element={
+                    <ProtectedRoute>
+                      <StaffPanel user={user} onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/admin/user/:id"
+                  element={
+                    <ProtectedRoute>
+                      <AdminUserDetail currentUser={user} onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/admin/match/edit/:id"
+                  element={
+                    <ProtectedRoute>
+                      <AdminEditMatch onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/admin/match/create"
+                  element={
+                    <ProtectedRoute>
+                      <AdminCreateMatch onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/admin/match/create/:duplicateId"
+                  element={
+                    <ProtectedRoute>
+                      <AdminCreateMatch onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/admin/modes"
+                  element={
+                    <ProtectedRoute>
+                      <AdminModes onPageChange={handlePageChange} />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/leaderboard"
+                  element={
+                    <ProtectedRoute>
+                      <Leaderboard />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route path="*" element={<Navigate to="/home" replace />} />
+              </Routes>
+            </motion.div>
+          </AnimatePresence>
+        </main>
+
+        {showNav && (
+          <BottomNav currentPage={currentPage} onPageChange={handlePageChange} user={user} />
+        )}
+
+        {/* Subtle iOS Blue Ambient Accent */}
+        <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+          <div className="absolute -top-24 left-1/4 w-[420px] h-[420px] bg-[#007AFF]/5 blur-[130px] rounded-full" />
+          <div className="absolute -bottom-24 right-1/4 w-[380px] h-[380px] bg-[#38BDF8]/6 blur-[130px] rounded-full" />
+        </div>
+      </div>
+    </IosFeedbackProvider>
+  );
+}

@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="gold-face" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="55%" stop-color="#f5c451"/>
+      <stop offset="100%" stop-color="#d99a26"/>
+    </linearGradient>
+    <linearGradient id="platinum" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Deep Obsidian Base -->
+  <rect width="512" height="512" rx="118" fill="#070b14"/>
+
+  <!-- Geometric Angular Crown Silhouette -->
+  <!-- Left crown wing -->
+  <polygon points="104,196 144,344 214,328 192,232" fill="url(#gold-face)"/>
+  <polygon points="104,196 192,232 162,256" fill="#070b14" opacity="0.18"/>
+  <!-- Left-mid peak -->
+  <polygon points="172,158 198,242 228,214" fill="url(#platinum)"/>
+  <!-- Center sovereign peak -->
+  <polygon points="256,102 216,204 256,192" fill="url(#gold-face)"/>
+  <polygon points="256,102 256,192 296,204" fill="url(#platinum)"/>
+  <!-- Right-mid peak -->
+  <polygon points="340,158 284,214 314,242" fill="url(#platinum)"/>
+  <!-- Right crown wing -->
+  <polygon points="408,196 320,232 298,328 368,344" fill="url(#platinum)"/>
+  <polygon points="408,196 368,344 338,334" fill="url(#gold-face)"/>
+
+  <!-- Dark Inner Mask Circle for Reload Ring Separation -->
+  <circle cx="256" cy="272" r="110" fill="#070b14"/>
+
+  <!-- Circular Reload Orbital Arc -->
+  <path
+    d="M 326 218 A 90 90 0 1 0 342 298"
+    fill="none"
+    stroke="url(#gold-face)"
+    stroke-width="26"
+    stroke-linecap="round"
+  />
+  <!-- Reload Arrow Tip -->
+  <polygon points="344,248 312,292 368,302" fill="url(#platinum)"/>
+
+  <!-- Sharp Diagonal K-Blade Cutting Through Ring -->
+  <polygon points="146,396 336,162 320,214 166,386" fill="url(#gold-face)" stroke="#070b14" stroke-width="10" stroke-linejoin="round"/>
+  <polygon points="224,234 252,234 252,324 224,324" fill="url(#platinum)" stroke="#070b14" stroke-width="8" stroke-linejoin="round"/>
+  <polygon points="258,284 352,366 320,378 242,302" fill="url(#platinum)" stroke="#070b14" stroke-width="8" stroke-linejoin="round"/>
+</svg>

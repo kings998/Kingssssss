@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>KINGS RELOAD - Free Fire Esports</title>
+    <meta name="description" content="KINGS RELOAD — Join daily Free Fire custom room matches, CS tournaments, and earn instant cash rewards." />
+    <meta property="og:title" content="KINGS RELOAD - Free Fire Esports" />
+    <meta property="og:description" content="Join daily Free Fire custom room matches, CS tournaments, and earn instant cash rewards." />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <meta name="theme-color" content="#FFFFFF" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <script defer async src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+  </head>
+  <body style="background:#F2F4F8;margin:0;">
+    <div id="root">
+      <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#F2F4F8;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#334155;">
+        <div style="width:44px;height:44px;border-radius:14px;background:#FFFFFF;border:1px solid #E2E8F0;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(0,122,255,0.12);font-weight:800;color:#007AFF;font-size:16px;">KR</div>
+        <p style="margin-top:14px;font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#64748B;">Loading KINGS RELOAD...</p>
+        <p id="kr-boot-err" style="display:none;margin-top:12px;max-width:300px;text-align:center;font-size:12px;color:#E11D48;background:#FFF1F2;border:1px solid #FECDD3;padding:10px 14px;border-radius:12px;"></p>
+      </div>
+    </div>
+    <script>
+      window.addEventListener('error', function (e) {
+        var el = document.getElementById('kr-boot-err');
+        if (el && e && e.message) {
+          el.style.display = 'block';
+          el.textContent = 'Startup notice: ' + e.message;
+        }
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

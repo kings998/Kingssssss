@@ -1,0 +1,244 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net - Deny all by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasEmailRole(allowedRoles) {
+      return request.auth.token.email_verified == true &&
+        request.auth.token.email is string &&
+        exists(/databases/$(database)/documents/roleAssignments/$(request.auth.token.email.lower())) &&
+        get(/databases/$(database)/documents/roleAssignments/$(request.auth.token.email.lower())).data.role in allowedRoles;
+    }
+
+    function hasUidRole(allowedRoles) {
+      return exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role in allowedRoles;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (
+          request.auth.token.email_verified == true &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() == "rajenderpatel251@gmail.com"
+        ) ||
+        hasUidRole(['admin']) ||
+        hasEmailRole(['admin'])
+      );
+    }
+
+    function isCoOwnerOrAdmin() {
+      return isAdmin() || (
+        isSignedIn() && (
+          hasUidRole(['co_owner', 'admin']) ||
+          hasEmailRole(['co_owner', 'admin'])
+        )
+      );
+    }
+
+    function isStaffOrAbove() {
+      return isCoOwnerOrAdmin() || (
+        isSignedIn() && (
+          hasUidRole(['staff', 'co_owner', 'admin']) ||
+          hasEmailRole(['staff', 'co_owner', 'admin'])
+        )
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidGameMode(data) {
+      return data.keys().hasAll(['id', 'gameId', 'title', 'image']) &&
+             data.id is string && data.id.size() <= 100 &&
+             data.gameId is string && data.gameId.size() <= 50 &&
+             data.title is string && data.title.size() <= 100 &&
+             data.image is string && data.image.size() <= 2500;
+    }
+
+    function isValidChatMessage(data) {
+      return data.keys().hasAll(['channel', 'senderId', 'senderName', 'senderRole', 'text', 'createdAt']) &&
+             data.keys().hasOnly(['channel', 'senderId', 'senderName', 'senderEmail', 'senderRole', 'text', 'replyToId', 'replyToName', 'replyToText', 'reactions', 'isPinned', 'createdAt']) &&
+             data.channel in ['general', 'support'] &&
+             data.senderId is string && data.senderId == request.auth.uid &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80 &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 500 &&
+             data.senderRole in ['user', 'staff', 'co_owner', 'admin'] &&
+             (
+               data.senderRole == 'user' ||
+               (data.senderRole == 'staff' && isStaffOrAbove()) ||
+               (data.senderRole == 'co_owner' && isCoOwnerOrAdmin()) ||
+               (data.senderRole == 'admin' && isAdmin())
+             ) &&
+             (!('isPinned' in data) || data.isPinned == false || isStaffOrAbove());
+    }
+
+    // --- Specific Collection Rules ---
+
+    // Game Modes: Dynamic game mode configurations
+    match /gameModes/{modeId} {
+      allow read, get, list: if isSignedIn();
+      allow create, update: if isCoOwnerOrAdmin() && isValidGameMode(request.resource.data);
+      allow delete: if isCoOwnerOrAdmin();
+    }
+
+    // Users: Profiles and wallet information
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['username', 'email', 'wallet']) &&
+               data.username is string && data.username.size() <= 100 &&
+               data.email is string && data.email.size() <= 200 &&
+               data.wallet is map;
+      }
+      allow get: if isSignedIn();
+      allow list: if isSignedIn(); // Allowed for Leaderboard
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && !('isAdmin' in request.resource.data && request.resource.data.isAdmin == true && !isAdmin()) && !('role' in request.resource.data && request.resource.data.role != 'user' && !isAdmin());
+      allow update: if isAdmin() || (
+        isCoOwnerOrAdmin() &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin']) || request.resource.data.isAdmin == resource.data.isAdmin) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || request.resource.data.role in ['user', 'staff'])
+      ) || (
+        isOwner(userId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username', 'phone', 'wallet', 'stats', 'isKycVerified', 'referralClaimed', 'deviceId', 'fcmEnabled', 'notificationsEnabled', 'gameIGNs', 'ign'])
+      );
+    }
+
+    // Games: Public list of supported games
+    match /games/{gameId} {
+      allow read, list, get: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Game Rules: Detailed rules for game modes
+    match /gameRules/{ruleId} {
+      allow read, list, get: if isSignedIn();
+      allow write: if isStaffOrAbove();
+    }
+
+    // Matches: The actual tournament/match instances
+    match /matches/{matchId} {
+      allow read, list, get: if isSignedIn();
+      allow create: if isStaffOrAbove();
+      allow delete: if isCoOwnerOrAdmin();
+      allow update: if isSignedIn() && (
+        isStaffOrAbove() || 
+        (request.resource.data.diff(resource.data).affectedKeys().hasAny(['players', 'playersCount']))
+      );
+    }
+
+    // Registrations: Player entries into matches
+    match /registrations/{registrationId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isStaffOrAbove());
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isStaffOrAbove() || (isOwner(resource.data.userId) && request.resource.data.userId == resource.data.userId);
+      allow delete: if isStaffOrAbove() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // Transactions: Financial audit trail (Immutable)
+    match /transactions/{transactionId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isStaffOrAbove());
+      // Allowed for Leaderboard, personal view, and Admin/Co-Owner/Staff earning counts
+      allow list: if isSignedIn() && (
+        isStaffOrAbove() || 
+        resource.data.userId == request.auth.uid || 
+        resource.data.type == 'win'
+      );
+      allow create: if isSignedIn() && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update, delete: if false;
+    }
+
+    // App Settings: Global configs
+    match /appSettings/{settingId} {
+      allow read, get, list: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Banners: Promotional banners
+    match /banners/{bannerId} {
+      allow read, get, list: if isSignedIn();
+      allow write: if isCoOwnerOrAdmin();
+    }
+
+    // Match Results: Declared winners and scores
+    match /matchResults/{matchId} {
+      allow read, list, get: if isSignedIn();
+      allow write: if isStaffOrAbove();
+    }
+
+    // Payment Settings: Gateway configurations
+    match /paymentSettings/{gatewayId} {
+      allow read, get, list: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Notifications: Push alerts & broadcast messages
+    match /notifications/{notificationId} {
+      allow read, get, list: if isSignedIn();
+      allow write: if isStaffOrAbove() || (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']));
+    }
+
+    // Legacy/Mirror support for tournaments
+    match /tournaments/{tournamentId} {
+      allow read, list, get: if isSignedIn();
+      allow write: if isStaffOrAbove();
+    }
+
+    // Community & Staff Chat Messages
+    match /chatMessages/{messageId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidChatMessage(request.resource.data);
+      allow update: if isSignedIn() && (
+        isStaffOrAbove() ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) && request.resource.data.reactions is map)
+      );
+      allow delete: if isStaffOrAbove() || (isSignedIn() && resource.data.senderId == request.auth.uid);
+    }
+
+    // Admin / Co-Owner / Staff role lookup documents
+    match /admins/{adminId} {
+      allow get: if isOwner(adminId) || isStaffOrAbove();
+      allow list: if isCoOwnerOrAdmin();
+      allow create, update: if isAdmin() || (
+        isCoOwnerOrAdmin() &&
+        request.resource.data.role == 'staff'
+      );
+      allow delete: if isAdmin() || (
+        isCoOwnerOrAdmin() &&
+        resource.data.role == 'staff'
+      );
+    }
+
+    // Email-based Staff & Co-Owner role assignments
+    match /roleAssignments/{emailKey} {
+      allow get: if (isSignedIn() && request.auth.token.email is string && request.auth.token.email.lower() == emailKey) || isCoOwnerOrAdmin();
+      allow list: if isCoOwnerOrAdmin();
+      allow create, update: if isAdmin() || (
+        isCoOwnerOrAdmin() &&
+        request.resource.data.role == 'staff'
+      );
+      allow delete: if isAdmin() || (
+        isCoOwnerOrAdmin() &&
+        resource.data.role == 'staff'
+      );
+    }
+
+    // Meta/Counters
+    match /meta/counters {
+      allow read, get, write: if isAdmin();
+    }
+  }
+}
